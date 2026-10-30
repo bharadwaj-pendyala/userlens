@@ -75,7 +75,7 @@ def init(root: Path, cli: str | None) -> int:
     config = {
         "version": 1,
         "command": command or ["REPLACE-ME"],
-        "cwd": ".",
+        "cwd": "..",
         "cases": [
             {"id": "help", "argv": ["--help"], "exit": 0},
             {"id": "no-args", "argv": [], "exit": 0},

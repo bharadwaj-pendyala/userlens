@@ -223,3 +223,25 @@ def test_init_guesses_a_node_cli_and_writes_starter_cases(tmp_path, capsys):
     config = json.loads((tmp_path / "eyes" / "eyes.json").read_text())
     assert config["command"] == ["node", "bin/tool.js"] and config["version"] == 1
     assert init(tmp_path, None) == 2
+
+
+def test_init_config_runs_from_the_project_root(tmp_path):
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin" / "tool.sh").write_text("echo hello from tool\n")
+    init(tmp_path, "sh bin/tool.sh")
+    project = Project(tmp_path / "eyes" / "eyes.json")
+    assert "hello from tool" in _result(project, "help").stdout
+
+
+@pytest.mark.parametrize("trace", [
+    "Traceback (most recent call last):\n  File \"x.py\", line 1\nValueError: x\n",
+    "Error: boom\n    at main (/app/bin/tool.js:3:9)\n    at Object.<anonymous> (/app/bin/tool.js:9:1)\n",
+    "thread 'main' panicked at src/main.rs:2:5:\nboom\n",
+    "panic: boom\n\ngoroutine 1 [running]:\nmain.main()\n",
+])
+def test_stack_traces_from_common_runtimes_are_caught(tmp_path, trace):
+    script = tmp_path / "trace.txt"
+    script.write_text(trace)
+    project = _project(tmp_path, [{"id": "t", "argv": [f"cat {script} >&2; exit 1"], "exit": 1}])
+    assert _checks(project, "t")["no-traceback"].status == "fail"

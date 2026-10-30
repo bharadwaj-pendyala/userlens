@@ -42,10 +42,20 @@ def _check_exit(result: Result, source) -> Check:
                  str(want), str(result.exit), source)
 
 
+# Python, Node (two or more "at" frames), Rust and Go stack traces.
+_STACK_TRACE = re.compile(
+    r"Traceback \(most recent call last\)"
+    r"|(?:^[ \t]+at [^\n]+:\d+:\d+\)?[ \t]*\n){2}"
+    r"|^thread '[^']*' panicked at"
+    r"|^goroutine \d+ \[running\]:",
+    re.MULTILINE,
+)
+
+
 def _check_no_traceback(result: Result, source) -> Check:
-    leaked = "Traceback (most recent call last)" in result.stderr + result.stdout
+    leaked = _STACK_TRACE.search(result.stderr + result.stdout)
     return Check("no-traceback", "fail" if leaked else "pass",
-                 "a Python traceback reached the user; catch it and print a one-line error" if leaked else "",
+                 "a stack trace reached the user; catch the error and print one line that says what to do" if leaked else "",
                  source=source, actual=tail(result.stderr) if leaked else None)
 
 
