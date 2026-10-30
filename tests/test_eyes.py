@@ -400,3 +400,12 @@ def test_init_with_an_existing_config_keeps_it_and_points_agents_at_it(tmp_path,
 def test_init_can_skip_agent_docs(tmp_path, capsys):
     init(tmp_path, "sh tool.sh", agent_docs=False)
     assert not (tmp_path / "AGENTS.md").exists() and not (tmp_path / "CLAUDE.md").exists()
+
+
+def test_service_readiness_ignores_proxy_settings(tmp_path, monkeypatch):
+    monkeypatch.setenv("http_proxy", "http://127.0.0.1:9")
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
+    service = {"command": [sys.executable, "-m", "http.server", "47327", "--bind", "127.0.0.1"],
+               "ready": {"url": "http://127.0.0.1:47327/"}, "timeout": 5}
+    project = _project(tmp_path, [{"id": "p", "services": ["web"], "argv": ["true"]}], services={"web": service})
+    assert "runs" not in _full(project, "p")

@@ -11,8 +11,8 @@ import signal
 import subprocess
 import threading
 import time
-import urllib.error
-import urllib.request
+import http.client
+import urllib.parse
 from pathlib import Path
 
 from .core import Project, Result
@@ -103,13 +103,19 @@ def _wait_ready(name: str, spec: dict, proc: subprocess.Popen, log_path: Path, u
 
 
 def _responds(url: str) -> bool:
+    # http.client talks to the server directly. urllib would honour proxy settings
+    # (http_proxy, or macOS system proxies) and could send a localhost probe elsewhere.
+    parts = urllib.parse.urlsplit(url)
+    connection_type = http.client.HTTPSConnection if parts.scheme == "https" else http.client.HTTPConnection
+    connection = connection_type(parts.hostname, parts.port, timeout=1)
     try:
-        with urllib.request.urlopen(url, timeout=1):
-            return True
-    except urllib.error.HTTPError:
-        return True  # the server answered, even if with an error status
-    except (urllib.error.URLError, OSError):
+        connection.request("GET", parts.path or "/")
+        connection.getresponse()
+        return True  # any answer, even an error status, means the server is up
+    except (OSError, http.client.HTTPException):
         return False
+    finally:
+        connection.close()
 
 
 def _stop(proc: subprocess.Popen) -> None:
@@ -138,6 +144,7 @@ def base_env(project: Project, case: dict, out_dir: Path, cwd: Path) -> dict:
         "PYTHONUTF8": "1",
         "PYTHONIOENCODING": "utf-8",
         "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONUNBUFFERED": "1",  # Python services write their logs as they go
         "TZ": "UTC",
         "TERM": "xterm-256color",
     }
