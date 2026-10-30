@@ -78,7 +78,8 @@ Every page case, and HTML files under `--browser`:
 
 - Each step runs, with a screenshot after it. A failed step stops the flow.
 - The page loads nothing outside localhost.
-- No horizontal overflow, no console errors, text contrast meets WCAG AA.
+- No horizontal overflow, no text hidden under another element (a fixed panel,
+  banner or modal), no console errors, and text contrast meets WCAG AA.
 
 ## The config
 

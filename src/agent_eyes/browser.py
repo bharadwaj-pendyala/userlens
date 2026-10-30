@@ -34,7 +34,23 @@ _INSPECT_JS = """
     return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b); };
   const bgOf = el => { for (let e = el; e; e = e.parentElement) {
     const c = parse(getComputedStyle(e).backgroundColor); if (c && c.a > 0) return c; } return {r: 255, g: 255, b: 255, a: 1}; };
-  const low = [], seen = new Set();
+  const low = [], seen = new Set(), obscured = new Set();
+  // Text is obscured when something else is on top at a point inside its glyphs:
+  // a fixed panel, a banner, a modal. Sample both ends and the middle of each line.
+  const hidden = (node, el) => {
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    for (const r of [...range.getClientRects()].slice(0, 3)) {
+      if (r.width < 4 || r.bottom < 0 || r.top > innerHeight) continue;
+      const y = r.top + r.height / 2;
+      for (const x of [r.left + 2, r.left + r.width / 2, r.right - 2]) {
+        if (x < 0 || x > innerWidth) continue;
+        const top = document.elementFromPoint(x, y);
+        if (top && !el.contains(top) && !top.contains(el)) return true;
+      }
+    }
+    return false;
+  };
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   while (walker.nextNode() && seen.size < 3000) {
     const node = walker.currentNode, el = node.parentElement;
@@ -42,6 +58,7 @@ _INSPECT_JS = """
     seen.add(el);
     const st = getComputedStyle(el);
     if (st.visibility === 'hidden' || st.display === 'none') continue;
+    if (hidden(node, el)) obscured.add(node.textContent.trim().slice(0, 50));
     const fg = parse(st.color), bg = bgOf(el);
     if (!fg) continue;
     const a = lum(fg), b = lum(bg), ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
@@ -57,6 +74,7 @@ _INSPECT_JS = """
     overflow: doc.scrollWidth - doc.clientWidth,
     clipped: [...new Set(clipped)].slice(0, 8),
     low_contrast: low,
+    obscured: [...obscured].slice(0, 8),
     untitled: titled ? [...document.querySelectorAll(titled)].filter(e => !e.title).length : 0,
     text_length: document.body.innerText.trim().length,
   };
@@ -297,6 +315,9 @@ def _page_checks(facts: dict, label: str, size: tuple[int, int], source) -> list
               f"elements past the right edge: {', '.join(facts['clipped']) or 'none'}"
               if facts["overflow"] > 0 or facts["clipped"] else "",
               source=source, extra=shot),
+        Check(f"browser-{label}-obscured", "fail" if facts["obscured"] else "pass",
+              f"{len(facts['obscured'])} piece(s) of text are covered by another element at {size[0]}px wide"
+              if facts["obscured"] else "", actual="\n".join(facts["obscured"]) or None, source=source, extra=shot),
         Check(f"browser-{label}-console", "fail" if facts["errors"] else "pass",
               "; ".join(facts["errors"][:5]), source=source),
         Check(f"browser-{label}-contrast", "fail" if facts["low_contrast"] else "pass",

@@ -270,3 +270,18 @@ def test_an_unexpected_harness_error_fails_one_case_and_the_run_continues(tmp_pa
     rows = _report(project)["checks"]
     assert any(r["case"] == "bad" and r["check"] == "runs" and "boom" in r["detail"] for r in rows)
     assert any(r["case"] == "good" and r["check"] == "exit-code" and r["status"] == "pass" for r in rows)
+
+
+def test_text_hidden_under_a_fixed_panel_is_flagged(tmp_path):
+    (tmp_path / "site").mkdir()
+    (tmp_path / "site" / "index.html").write_text(
+        "<!doctype html><title>t</title><h1 id=title>A long heading that runs under the panel</h1>"
+        "<aside style='position:fixed;top:0;right:0;width:70%;height:100%;background:#eee'>panel</aside>")
+    service = {"command": [sys.executable, "-m", "http.server", "47324", "--bind", "127.0.0.1"],
+               "cwd": "{workspace}", "ready": {"url": "http://127.0.0.1:47324/"}}
+    project = _project(tmp_path, [{"id": "cover", "cwd": "site", "services": ["web"],
+                                   "page": {"steps": [{"goto": "http://127.0.0.1:47324/index.html"}]}}],
+                       services={"web": service})
+    failures = {r["check"]: r for r in _report(project)["failures"]}
+    assert "browser-page-obscured" in failures
+    assert "A long heading" in failures["browser-page-obscured"]["actual"]
