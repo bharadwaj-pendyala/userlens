@@ -222,7 +222,6 @@ def test_init_guesses_a_node_cli_and_writes_starter_cases(tmp_path, capsys):
     assert init(tmp_path, None) == 0
     config = json.loads((tmp_path / "eyes" / "eyes.json").read_text())
     assert config["command"] == ["node", "bin/tool.js"] and config["version"] == 1
-    assert init(tmp_path, None) == 2
 
 
 def test_init_config_runs_from_the_project_root(tmp_path):
@@ -369,3 +368,35 @@ def test_files_are_checked_after_a_page_flow(tmp_path):
                                    "files": {"result.txt": {"contains": ["saved"]}}}], services={"web": service})
     rows = {r["check"]: r for r in _report(project)["checks"] if r["case"] == "p"}
     assert rows["file result.txt"]["status"] == "pass"
+
+
+def test_init_teaches_agents_the_loop_in_agents_and_claude_md(tmp_path, capsys):
+    (tmp_path / ".git").mkdir()
+    assert init(tmp_path, "sh tool.sh") == 0
+    for name in ("AGENTS.md", "CLAUDE.md"):
+        text = (tmp_path / name).read_text()
+        assert "<!-- eyes:start -->" in text and "eyes run --case" in text and "eyes/eyes.json" in text
+
+
+def test_init_keeps_existing_agent_notes_and_never_duplicates_the_block(tmp_path, capsys):
+    (tmp_path / "AGENTS.md").write_text("# Notes\n\nUse tabs.\n")
+    init(tmp_path, "sh tool.sh")
+    init(tmp_path, "sh tool.sh")
+    text = (tmp_path / "AGENTS.md").read_text()
+    assert text.startswith("# Notes\n\nUse tabs.\n")
+    assert text.count("<!-- eyes:start -->") == 1
+
+
+def test_init_with_an_existing_config_keeps_it_and_points_agents_at_it(tmp_path, capsys):
+    config = tmp_path / "tests" / "ux" / "eyes.json"
+    config.parent.mkdir(parents=True)
+    config.write_text('{"version": 1, "command": ["x"], "cases": []}')
+    assert init(tmp_path, None) == 0
+    assert config.read_text() == '{"version": 1, "command": ["x"], "cases": []}'
+    assert not (tmp_path / "eyes" / "eyes.json").exists()
+    assert "tests/ux/eyes.json" in (tmp_path / "AGENTS.md").read_text()
+
+
+def test_init_can_skip_agent_docs(tmp_path, capsys):
+    init(tmp_path, "sh tool.sh", agent_docs=False)
+    assert not (tmp_path / "AGENTS.md").exists() and not (tmp_path / "CLAUDE.md").exists()

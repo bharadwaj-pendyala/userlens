@@ -34,10 +34,20 @@ Leave out `[browser]` and the Playwright step if you only test a CLI.
 ## Start
 
 ```bash
-eyes init           # writes eyes/eyes.json with three starter cases
+eyes init           # writes eyes/eyes.json and teaches your coding agent the loop
 eyes run            # runs every case, writes artifacts/eyes/report.json
 eyes approve --all  # accepts the output once you have read it
 ```
+
+`eyes init` also adds a short "Verify changes with eyes" section to
+`AGENTS.md` (read by Codex and most agents) and `CLAUDE.md` (read by Claude
+Code). It creates either file if needed. The section tells the agent to write
+cases before code, run them, read the report and screenshots, and approve only
+intended changes. So any coding agent in the repo follows the loop without a
+prompt. The section sits between `<!-- eyes:start -->` and `<!-- eyes:end -->`;
+running `eyes init` again refreshes it and leaves the rest of the file alone.
+Add `--no-agent-docs` to skip it. On a repo that already has a config, `eyes
+init` keeps the config and only writes this section.
 
 `eyes init` guesses your CLI from `package.json` (`bin`) or `pyproject.toml`
 (`[project.scripts]`, which must be installed in the same environment as
