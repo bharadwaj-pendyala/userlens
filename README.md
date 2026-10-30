@@ -1,4 +1,6 @@
-# agent-eyes
+# userlens
+
+[![CI](https://github.com/bharadwaj-pendyala/userlens/actions/workflows/ci.yml/badge.svg)](https://github.com/bharadwaj-pendyala/userlens/actions/workflows/ci.yml)
 
 Check that what you built actually works, the way a user would use it. Then
 check that it is good to use.
@@ -25,11 +27,13 @@ only. Page flows and screenshots use Playwright.
 ## Install
 
 ```bash
-pip install "agent-eyes[browser] @ git+https://github.com/bharadwaj-pendyala/agent-eyes"
+pip install 'userlens[browser]'
 python -m playwright install chromium
 ```
 
-Leave out `[browser]` and the Playwright step if you only test a CLI.
+Leave out `[browser]` and the Playwright step if you only test a CLI. The
+package is `userlens`; its command is `eyes` (`userlens` works too). It runs on
+macOS and Linux. Windows is not supported yet.
 
 ## Start
 

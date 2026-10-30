@@ -4,9 +4,9 @@ import sys
 
 import pytest
 
-from agent_eyes import ConfigError, Project
-from agent_eyes import browser, checks, report, runner
-from agent_eyes.cli import init, main
+from userlens import ConfigError, Project
+from userlens import browser, checks, report, runner
+from userlens.cli import init, main
 
 
 def _project(tmp_path, cases, **config):

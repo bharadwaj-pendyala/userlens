@@ -106,7 +106,7 @@ BLOCK_START, BLOCK_END = "<!-- eyes:start -->", "<!-- eyes:end -->"
 AGENT_BLOCK = """{start}
 ## Verify changes with eyes
 
-This repo uses [agent-eyes](https://github.com/bharadwaj-pendyala/agent-eyes)
+This repo uses [userlens](https://github.com/bharadwaj-pendyala/userlens)
 to check that the product works the way a user uses it. The cases are in
 `{config}`.
 

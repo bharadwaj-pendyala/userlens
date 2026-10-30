@@ -250,7 +250,7 @@ def page_checks(eyes, why: str, project: Project, result: Result, size: tuple[in
     """Run a page case's steps. Each step is one check, then layout checks on the final page."""
     if not isinstance(eyes, PlaywrightEyes):
         return [Check("page-engine", "fail", "page cases need Playwright: "
-                      "pip install 'agent-eyes[browser]' && python -m playwright install chromium"
+                      "pip install 'userlens[browser]' && python -m playwright install chromium"
                       + (f" ({why})" if why else ""))]
     page = result.case["page"]
     facts = eyes.flow(page["steps"], result.out_dir, size, int(page.get("step_timeout", 10) * 1000),
