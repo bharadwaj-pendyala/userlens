@@ -14,7 +14,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from .core import Check, Project, Result
+from .core import STEP_ACTIONS, Check, Project, Result
 
 
 VIEWPORTS = {"desktop": (1280, 900), "mobile": (390, 844)}
@@ -93,13 +93,14 @@ class PlaywrightEyes:
         self._playwright = sync_playwright().start()
         self._browser = self._playwright.chromium.launch()
 
-    def _open(self, size: tuple[int, int], allow_localhost: bool):
+    def _open(self, size: tuple[int, int], allow_localhost: bool, allow: tuple[str, ...] = ()):
         context = self._browser.new_context(viewport={"width": size[0], "height": size[1]})
         page = context.new_page()
         blocked, errors = [], []
         allowed = ("file:", "data:", "about:", "blob:")
         if allow_localhost:
             allowed += ("http://localhost", "http://127.0.0.1", "ws://localhost", "ws://127.0.0.1")
+        allowed += tuple(allow)
 
         def route(request_route):
             url = request_route.request.url
@@ -121,14 +122,15 @@ class PlaywrightEyes:
         context.close()
         return {**facts, "blocked": blocked, "errors": errors, "screenshot": str(png)}
 
-    def flow(self, steps: list[dict], out_dir: Path, size: tuple[int, int], timeout_ms: int) -> dict:
+    def flow(self, steps: list[dict], out_dir: Path, size: tuple[int, int], timeout_ms: int,
+             allow: tuple[str, ...] = ()) -> dict:
         """Drive the page step by step like a user, with a screenshot after every step."""
-        context, page, blocked, errors = self._open(size, allow_localhost=True)
+        context, page, blocked, errors = self._open(size, allow_localhost=True, allow=allow)
         page.set_default_timeout(timeout_ms)
         log = []
         try:
             for number, step in enumerate(steps, 1):
-                action = next(iter(step))
+                action = next(key for key in step if key in STEP_ACTIONS)
                 png = out_dir / f"step-{number:02d}-{action}.png"
                 entry = {"step": number, "action": action, "target": step[action], "screenshot": str(png)}
                 try:
@@ -172,10 +174,6 @@ class ChromeEyes:
 
     def close(self):
         pass
-
-
-STEP_ACTIONS = {"goto", "click", "select_text", "fill", "press", "wait_for", "expect_text",
-                "expect_count", "reload", "wait"}
 
 
 def _do(page, action: str, step: dict) -> None:
@@ -255,7 +253,8 @@ def page_checks(eyes, why: str, project: Project, result: Result, size: tuple[in
                       "pip install 'agent-eyes[browser]' && python -m playwright install chromium"
                       + (f" ({why})" if why else ""))]
     page = result.case["page"]
-    facts = eyes.flow(page["steps"], result.out_dir, size, int(page.get("step_timeout", 10) * 1000))
+    facts = eyes.flow(page["steps"], result.out_dir, size, int(page.get("step_timeout", 10) * 1000),
+                      tuple(page.get("allow", [])))
     result.steps = facts["steps"]
     result.page_text = facts["text"]
     source = project.sources.get("page")

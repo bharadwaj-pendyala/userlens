@@ -110,7 +110,7 @@ def _check_snapshot(project: Project, result: Result, actual: str) -> Check:
 def _reproduce(project: Project, result: Result) -> dict:
     case = result.case
     if "page" in case or case.get("workspace") or case.get("setup") or case.get("services"):
-        return {"shell": f"eyes run --config {shell_quote(rel(project.config_path))} --case {case['id']}"}
+        return {"shell": f"eyes --config {shell_quote(rel(project.config_path))} run --case {case['id']}"}
     command = [project.expand(part, result.out_dir, result.cwd)
                for part in case.get("command", project.config.get("command", []))] + result.argv
     env = {k: project.expand(v, result.out_dir, result.cwd)

@@ -141,6 +141,10 @@ def base_env(project: Project, case: dict, out_dir: Path, cwd: Path) -> dict:
         "TZ": "UTC",
         "TERM": "xterm-256color",
     }
+    # Only named variables come through, so a case never depends on whoever runs it by accident.
+    for name in [*project.config.get("pass_env", []), *case.get("pass_env", [])]:
+        if name in os.environ:
+            env[name] = os.environ[name]
     for source in (project.config.get("env", {}), case.get("env", {})):
         env.update({k: project.expand(v, out_dir, cwd) for k, v in source.items()})
     return env

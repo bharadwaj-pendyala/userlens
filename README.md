@@ -31,7 +31,8 @@ eyes approve --all  # accepts the output once you have read it
 ```
 
 `eyes init` guesses your CLI from `package.json` (`bin`) or `pyproject.toml`
-(`[project.scripts]`). Pass `--command 'node bin/tool.js'` to set it yourself.
+(`[project.scripts]`, which must be installed in the same environment as
+`eyes`). Pass `--command 'node bin/tool.js'` to set it yourself.
 
 ## Commands
 
@@ -104,6 +105,7 @@ Top-level keys:
 | `command` | How to run your CLI. `{python}` is the Python that runs eyes. |
 | `cwd` | Folder the cases run in, relative to the config. |
 | `env` | Extra environment variables for every case. |
+| `pass_env` | Names of variables to copy from your shell, such as `DATABASE_URL`. Cases start from a clean environment, so nothing else leaks in. |
 | `timeout` | Seconds before a case is stopped (default 30). |
 | `sources` | Files to name in failures: `cli`, `terminal`, `json`, `html`, `page`. |
 | `plugins` | Python files with `checks(result, project) -> list[Check]`. |
@@ -117,7 +119,7 @@ Case keys:
 | `argv`, `command` | Arguments, and an optional per-case command. `{out}` is the case artifact folder. |
 | `exit` | Expected exit code (default 0). |
 | `tty`, `cols` | Run in a real terminal of this width. With `stdin`, stdin is a pipe. |
-| `stdin`, `stdin_file`, `env`, `cwd`, `timeout` | Input and environment. |
+| `stdin`, `stdin_file`, `env`, `pass_env`, `cwd`, `timeout` | Input and environment. |
 | `workspace: "temp"` | Run in a fresh copy of `cwd`, so the case can change files safely. `{workspace}` is its path. The copy leaves out `.git` and the artifacts folder; run `git init` in `setup` if the case needs a repo. |
 | `setup` | Shell commands to run in the workspace first, for example `git init`. |
 | `services` | Names of services to start before the case and stop after it. |
@@ -167,6 +169,10 @@ Steps: `goto`, `click` (with `count`), `select_text`, `fill` (with `text`),
 `press` (with `on`), `wait_for` (with `state`), `expect_text` (with `in`),
 `expect_count` (with `count`), `reload`, `wait` (seconds). `viewport` is
 `desktop`, `mobile` or `[width, height]`. `step_timeout` is in seconds.
+
+A page may load from localhost only. List other origins the flow needs in
+`allow`, for example `"allow": ["https://fonts.gstatic.com/", "https://api.example.com/"]`.
+Any other request is blocked and fails the network check.
 
 ## The agent loop
 

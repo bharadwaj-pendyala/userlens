@@ -285,3 +285,46 @@ def test_text_hidden_under_a_fixed_panel_is_flagged(tmp_path):
     failures = {r["check"]: r for r in _report(project)["failures"]}
     assert "browser-page-obscured" in failures
     assert "A long heading" in failures["browser-page-obscured"]["actual"]
+
+
+def test_misspelled_page_step_is_rejected_with_a_suggestion(tmp_path):
+    with pytest.raises(ConfigError, match="did you mean 'expect_text'"):
+        _project(tmp_path, [{"id": "p", "page": {"steps": [{"expect_txt": "hi"}]}}])
+
+
+def test_init_uses_the_declared_console_script(tmp_path):
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "tiny"\n[project.scripts]\ntiny = "tiny.cli:main"\n')
+    init(tmp_path, None)
+    assert json.loads((tmp_path / "eyes" / "eyes.json").read_text())["command"] == ["tiny"]
+
+
+def test_pass_env_lets_named_variables_through(tmp_path, monkeypatch):
+    monkeypatch.setenv("EYES_TEST_TOKEN", "secret-value")
+    monkeypatch.setenv("EYES_OTHER", "hidden")
+    project = _project(tmp_path, [{"id": "e", "argv": ["echo $EYES_TEST_TOKEN-$EYES_OTHER"],
+                                   "stdout_contains": ["secret-value-"], "stdout_absent": ["hidden"]}],
+                       pass_env=["EYES_TEST_TOKEN"])
+    found = _checks(project, "e")
+    assert found["stdout-contains"].status == "pass" and found["stdout-absent"].status == "pass"
+
+
+def test_reproduce_for_a_service_case_is_a_runnable_eyes_command(tmp_path):
+    project = _project(tmp_path, [{"id": "s", "workspace": "temp", "argv": ["true"]}])
+    shell = report._reproduce(project, _result(project, "s"))["shell"]
+    assert shell.startswith("eyes --config ") and shell.endswith(" run --case s")
+
+
+def test_page_allow_list_lets_named_hosts_through(tmp_path):
+    (tmp_path / "site").mkdir()
+    (tmp_path / "site" / "index.html").write_text(
+        "<!doctype html><title>t</title><p>hi</p><img src='https://cdn.example.invalid/x.png'>")
+    service = {"command": [sys.executable, "-m", "http.server", "47325", "--bind", "127.0.0.1"],
+               "cwd": "{workspace}", "ready": {"url": "http://127.0.0.1:47325/"}}
+    steps = [{"goto": "http://127.0.0.1:47325/index.html"}]
+    blocked = _project(tmp_path, [{"id": "b", "cwd": "site", "services": ["web"], "page": {"steps": steps}}],
+                       services={"web": service})
+    assert "browser-page-network" in {r["check"] for r in _report(blocked)["failures"]}
+    allowed = _project(tmp_path, [{"id": "a", "cwd": "site", "services": ["web"],
+                                   "page": {"steps": steps, "allow": ["https://cdn.example.invalid/"]}}],
+                       services={"web": service})
+    assert "browser-page-network" not in {r["check"] for r in _report(allowed)["failures"]}

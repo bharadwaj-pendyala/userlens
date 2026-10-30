@@ -18,16 +18,20 @@ CASE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 PROJECT_KEYS = {
     "version", "command", "cwd", "env", "timeout", "artifacts", "snapshots", "plugins",
-    "sources", "plural_nouns", "titled", "services", "cases",
+    "sources", "plural_nouns", "titled", "services", "cases", "pass_env",
 }
 CASE_KEYS = {
     "id", "note", "argv", "command", "exit", "tty", "cols", "stdin", "stdin_file", "env", "cwd",
-    "timeout", "workspace", "setup", "services", "page",
+    "timeout", "workspace", "setup", "services", "page", "pass_env",
     "stdout_contains", "stdout_absent", "stdout_regex", "stdout_empty",
     "stderr_contains", "stderr_absent", "stderr_regex",
     "expect_ansi", "check_width", "json", "html", "html_contains",
 }
 SERVICE_KEYS = {"command", "cwd", "env", "ready", "timeout"}
+PAGE_KEYS = {"steps", "viewport", "step_timeout", "allow"}
+STEP_ACTIONS = {"goto", "click", "select_text", "fill", "press", "wait_for", "expect_text",
+                "expect_count", "reload", "wait"}
+STEP_OPTIONS = {"count", "text", "on", "state", "in"}
 
 
 class ConfigError(Exception):
@@ -130,9 +134,23 @@ def _validate(config: dict) -> None:
             raise ConfigError(f"duplicate case id {case_id!r}")
         seen.add(case_id)
         _unknown_keys(case, CASE_KEYS, f"case {case_id!r}")
+        if "page" in case:
+            _validate_page(case["page"], case_id)
         for name in case.get("services", []):
             if name not in config.get("services", {}):
                 raise ConfigError(f"case {case_id!r} uses service {name!r}, which is not defined")
+
+
+def _validate_page(page: dict, case_id: str) -> None:
+    _unknown_keys(page, PAGE_KEYS, f"case {case_id!r} page")
+    if not page.get("steps"):
+        raise ConfigError(f"case {case_id!r}: page needs a list of steps")
+    for number, step in enumerate(page["steps"], 1):
+        actions = [key for key in step if key not in STEP_OPTIONS]
+        where = f"case {case_id!r} step {number}"
+        if len(actions) != 1:
+            raise ConfigError(f"{where}: give exactly one action, one of {', '.join(sorted(STEP_ACTIONS))}")
+        _unknown_keys({actions[0]: None}, STEP_ACTIONS, where)
 
 
 def _unknown_keys(table: dict, known: set[str], where: str) -> None:

@@ -105,8 +105,7 @@ def _guess_command(root: Path) -> list[str]:
     if pyproject.exists():
         scripts = tomllib.loads(pyproject.read_text(encoding="utf-8")).get("project", {}).get("scripts", {})
         if scripts:
-            module = next(iter(scripts.values())).split(":")[0].rsplit(".", 1)[0]
-            return ["{python}", "-m", module]
+            return [next(iter(scripts))]  # the console script, as users type it
     return []
 
 
