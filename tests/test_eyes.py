@@ -9,6 +9,14 @@ from userlens import browser, checks, report, runner
 from userlens.cli import init, main
 
 
+def _static_server(port):
+    # http.server's HTTPServer calls socket.getfqdn() on bind, which can hang for
+    # minutes on macOS CI runners. A bare TCPServer serves the same files without it.
+    code = ("import http.server, socketserver; socketserver.TCPServer.allow_reuse_address = True; "
+            f"socketserver.TCPServer(('127.0.0.1', {port}), http.server.SimpleHTTPRequestHandler).serve_forever()")
+    return [sys.executable, "-c", code]
+
+
 def _project(tmp_path, cases, **config):
     (tmp_path / ".git").mkdir(exist_ok=True)
     path = tmp_path / "eyes.json"
@@ -119,7 +127,7 @@ def test_failed_setup_is_reported_with_its_output(tmp_path):
 
 
 def test_service_is_ready_before_the_case_and_stopped_after(tmp_path):
-    service = {"command": [sys.executable, "-m", "http.server", "47321", "--bind", "127.0.0.1"],
+    service = {"command": _static_server(47321),
                "ready": {"url": "http://127.0.0.1:47321/"}}
     fetch = f"{sys.executable} -c \"import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:47321/').status)\""
     project = _project(tmp_path, [{"id": "web", "services": ["web"], "argv": [fetch],
@@ -192,7 +200,7 @@ def _page_project(tmp_path, steps):
     (tmp_path / "site" / "index.html").write_text(
         "<!doctype html><title>t</title><p id=intro>Hello reader.</p>"
         "<button id=go onclick=\"document.querySelector('#intro').textContent='Clicked.'\">Go</button>")
-    service = {"command": [sys.executable, "-m", "http.server", "47323", "--bind", "127.0.0.1"],
+    service = {"command": _static_server(47323),
                "cwd": "{workspace}", "ready": {"url": "http://127.0.0.1:47323/"}}
     return _project(tmp_path, [{"id": "flow", "cwd": "site", "services": ["web"],
                                 "page": {"steps": steps, "step_timeout": 3}}], services={"web": service})
@@ -276,7 +284,7 @@ def test_text_hidden_under_a_fixed_panel_is_flagged(tmp_path):
     (tmp_path / "site" / "index.html").write_text(
         "<!doctype html><title>t</title><h1 id=title>A long heading that runs under the panel</h1>"
         "<aside style='position:fixed;top:0;right:0;width:70%;height:100%;background:#eee'>panel</aside>")
-    service = {"command": [sys.executable, "-m", "http.server", "47324", "--bind", "127.0.0.1"],
+    service = {"command": _static_server(47324),
                "cwd": "{workspace}", "ready": {"url": "http://127.0.0.1:47324/"}}
     project = _project(tmp_path, [{"id": "cover", "cwd": "site", "services": ["web"],
                                    "page": {"steps": [{"goto": "http://127.0.0.1:47324/index.html"}]}}],
@@ -317,7 +325,7 @@ def test_page_allow_list_lets_named_hosts_through(tmp_path):
     (tmp_path / "site").mkdir()
     (tmp_path / "site" / "index.html").write_text(
         "<!doctype html><title>t</title><p>hi</p><img src='https://cdn.example.invalid/x.png'>")
-    service = {"command": [sys.executable, "-m", "http.server", "47325", "--bind", "127.0.0.1"],
+    service = {"command": _static_server(47325),
                "cwd": "{workspace}", "ready": {"url": "http://127.0.0.1:47325/"}}
     steps = [{"goto": "http://127.0.0.1:47325/index.html"}]
     blocked = _project(tmp_path, [{"id": "b", "cwd": "site", "services": ["web"], "page": {"steps": steps}}],
@@ -360,7 +368,7 @@ def test_stdout_json_checks_values_by_path(tmp_path):
 def test_files_are_checked_after_a_page_flow(tmp_path):
     (tmp_path / "site").mkdir()
     (tmp_path / "site" / "index.html").write_text("<!doctype html><title>t</title><p>hi</p>")
-    service = {"command": [sys.executable, "-m", "http.server", "47326", "--bind", "127.0.0.1"],
+    service = {"command": _static_server(47326),
                "cwd": "{workspace}", "ready": {"url": "http://127.0.0.1:47326/"}}
     project = _project(tmp_path, [{"id": "p", "cwd": "site", "workspace": "temp", "services": ["web"],
                                    "setup": ["echo saved > result.txt"],
@@ -405,7 +413,7 @@ def test_init_can_skip_agent_docs(tmp_path, capsys):
 def test_service_readiness_ignores_proxy_settings(tmp_path, monkeypatch):
     monkeypatch.setenv("http_proxy", "http://127.0.0.1:9")
     monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
-    service = {"command": [sys.executable, "-m", "http.server", "47327", "--bind", "127.0.0.1"],
+    service = {"command": _static_server(47327),
                "ready": {"url": "http://127.0.0.1:47327/"}, "timeout": 5}
     project = _project(tmp_path, [{"id": "p", "services": ["web"], "argv": ["true"]}], services={"web": service})
     assert "runs" not in _full(project, "p")
