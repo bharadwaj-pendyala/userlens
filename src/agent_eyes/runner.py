@@ -30,7 +30,13 @@ def prepare(project: Project, case: dict) -> tuple[Path, Path]:
     cwd = project.base / project.config.get("cwd", ".") / case.get("cwd", ".")
     if case.get("workspace") == "temp":
         workspace = out_dir / "workspace"
-        shutil.copytree(cwd, workspace, symlinks=True)
+        skip = project.artifacts.resolve()
+        # The artifacts folder holds this very workspace, so copying it would recurse forever.
+        ignore = lambda folder, names: [n for n in names if n == ".git" or (Path(folder) / n).resolve() == skip]
+        try:
+            shutil.copytree(cwd, workspace, symlinks=True, ignore=ignore)
+        except (OSError, shutil.Error) as error:
+            raise HarnessError(f"could not copy {cwd} into a temp workspace: {str(error)[:300]}") from None
         cwd = workspace
     return out_dir, cwd
 

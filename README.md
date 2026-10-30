@@ -117,7 +117,7 @@ Case keys:
 | `exit` | Expected exit code (default 0). |
 | `tty`, `cols` | Run in a real terminal of this width. With `stdin`, stdin is a pipe. |
 | `stdin`, `stdin_file`, `env`, `cwd`, `timeout` | Input and environment. |
-| `workspace: "temp"` | Run in a fresh copy of `cwd`, so the case can change files safely. `{workspace}` is its path. |
+| `workspace: "temp"` | Run in a fresh copy of `cwd`, so the case can change files safely. `{workspace}` is its path. The copy leaves out `.git` and the artifacts folder; run `git init` in `setup` if the case needs a repo. |
 | `setup` | Shell commands to run in the workspace first, for example `git init`. |
 | `services` | Names of services to start before the case and stop after it. |
 | `stdout_contains`, `stdout_absent`, `stdout_regex`, `stdout_empty` | Checks on stdout. The same `stderr_` keys exist. |

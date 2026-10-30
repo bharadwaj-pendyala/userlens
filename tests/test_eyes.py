@@ -245,3 +245,28 @@ def test_stack_traces_from_common_runtimes_are_caught(tmp_path, trace):
     script.write_text(trace)
     project = _project(tmp_path, [{"id": "t", "argv": [f"cat {script} >&2; exit 1"], "exit": 1}])
     assert _checks(project, "t")["no-traceback"].status == "fail"
+
+
+def test_temp_workspace_of_the_project_root_skips_artifacts_and_git(tmp_path):
+    (tmp_path / "src.txt").write_text("source")
+    project = _project(tmp_path, [{"id": "w", "workspace": "temp", "argv": ["ls -a"],
+                                   "stdout_contains": ["src.txt"], "stdout_absent": ["artifacts", ".git"]}],
+                       artifacts="{base}/artifacts/eyes")
+    found = _full(project, "w")
+    assert found["stdout-contains"].status == "pass"
+    assert found["stdout-absent"].status == "pass"
+
+
+def test_an_unexpected_harness_error_fails_one_case_and_the_run_continues(tmp_path, monkeypatch):
+    project = _project(tmp_path, [{"id": "bad", "argv": ["true"]}, {"id": "good", "argv": ["echo ok"]}])
+    real = runner.run_command
+
+    def explode(project_, case, *args):
+        if case["id"] == "bad":
+            raise RuntimeError("boom")
+        return real(project_, case, *args)
+
+    monkeypatch.setattr(runner, "run_command", explode)
+    rows = _report(project)["checks"]
+    assert any(r["case"] == "bad" and r["check"] == "runs" and "boom" in r["detail"] for r in rows)
+    assert any(r["case"] == "good" and r["check"] == "exit-code" and r["status"] == "pass" for r in rows)

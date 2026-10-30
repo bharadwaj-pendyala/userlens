@@ -33,10 +33,12 @@ def run(project: Project, only: list[str] | None, browser_wanted: bool) -> int:
 
 
 def _run_one(project: Project, case: dict, eyes, why: str, browser_wanted: bool) -> tuple[Result, list[Check]]:
-    out_dir, cwd = runner.prepare(project, case)
-    env = runner.base_env(project, case, out_dir, cwd)
+    out_dir = project.artifacts / "cases" / case["id"]
+    cwd = project.base
     checks: list[Check] = []
     try:
+        out_dir, cwd = runner.prepare(project, case)
+        env = runner.base_env(project, case, out_dir, cwd)
         runner.run_setup(project, case, cwd, out_dir, env)
         with runner.services(project, case.get("services", []), cwd, out_dir, env):
             if "page" in case:
@@ -47,6 +49,8 @@ def _run_one(project: Project, case: dict, eyes, why: str, browser_wanted: bool)
                 result = runner.run_command(project, case, out_dir, cwd, env)
     except runner.HarnessError as error:
         result = runner.failed_result(case, out_dir, cwd, str(error))
+    except Exception as error:  # a bug in eyes or a plugin must cost one case, not the whole report
+        result = runner.failed_result(case, out_dir, cwd, f"eyes hit an internal error: {error!r}")
 
     checks = generic_checks(project, result) + checks
     if not result.harness_error:
