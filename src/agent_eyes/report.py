@@ -72,10 +72,13 @@ def _guarded(make_checks) -> list[Check]:
 def snapshot_text(project: Project, result: Result) -> str:
     if result.is_page:
         parts = [f"page {result.case['page']['steps'][0].get('goto', '')}".rstrip()]
-        parts += [f"  {s['step']:>2}. {s['action']} {s['target']}  [{s['status']}]" for s in result.steps]
+        parts += [f"  {s['step']:>2}. {s['action']}"
+                  + ("" if isinstance(s["target"], bool) else f" {s['target']}") + f"  [{s['status']}]"
+                  for s in result.steps]
         parts += ["--- visible text", result.page_text.strip()]
     else:
-        parts = [f"$ {' '.join(shell_quote(a) for a in result.argv)}",
+        shown = [*result.case.get("command", []), *result.argv]  # a per-case command is part of what ran
+        parts = [f"$ {' '.join(shell_quote(project.expand(a, result.out_dir, result.cwd)) for a in shown)}",
                  f"[exit {result.exit}{' tty ' + str(result.cols) + ' cols' if result.tty else ''}]",
                  "--- stdout", result.stdout.rstrip("\n"), "--- stderr", result.stderr.rstrip("\n")]
         if result.case.get("html"):
