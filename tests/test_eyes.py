@@ -1,0 +1,225 @@
+import json
+import subprocess
+import sys
+
+import pytest
+
+from agent_eyes import ConfigError, Project
+from agent_eyes import browser, checks, report, runner
+from agent_eyes.cli import init, main
+
+
+def _project(tmp_path, cases, **config):
+    (tmp_path / ".git").mkdir(exist_ok=True)
+    path = tmp_path / "eyes.json"
+    path.write_text(json.dumps({"version": 1, "command": ["sh", "-c"], "cases": cases, **config}))
+    return Project(path)
+
+
+def _result(project, case_id):
+    case = next(c for c in project.cases() if c["id"] == case_id)
+    out_dir, cwd = runner.prepare(project, case)
+    env = runner.base_env(project, case, out_dir, cwd)
+    return runner.run_command(project, case, out_dir, cwd, env)
+
+
+def _checks(project, case_id):
+    return {c.check: c for c in checks.generic_checks(project, _result(project, case_id))}
+
+
+def _full(project, case_id):
+    case = next(c for c in project.cases() if c["id"] == case_id)
+    _, case_checks = report._run_one(project, case, None, "", False)
+    return {c.check: c for c in case_checks}
+
+
+def _report(project):
+    report.run(project, None, browser_wanted=False)
+    return json.loads((project.artifacts / "report.json").read_text())
+
+
+# config
+
+def test_config_without_a_version_is_rejected(tmp_path):
+    (tmp_path / "eyes.json").write_text(json.dumps({"command": ["true"], "cases": []}))
+    with pytest.raises(ConfigError, match="version"):
+        Project(tmp_path / "eyes.json")
+
+
+def test_misspelled_case_key_gets_a_suggestion(tmp_path):
+    with pytest.raises(ConfigError, match="did you mean 'stdout_contains'"):
+        _project(tmp_path, [{"id": "a", "stdout_contain": ["x"]}])
+
+
+@pytest.mark.parametrize("bad_id", ["/tmp/x", "../up", "", "a b"])
+def test_case_ids_that_could_escape_the_artifacts_folder_are_rejected(tmp_path, bad_id):
+    with pytest.raises(ConfigError):
+        _project(tmp_path, [{"id": bad_id}])
+
+
+def test_duplicate_case_ids_are_rejected(tmp_path):
+    with pytest.raises(ConfigError):
+        _project(tmp_path, [{"id": "a"}, {"id": "a"}])
+
+
+def test_undefined_service_is_rejected(tmp_path):
+    with pytest.raises(ConfigError, match="not defined"):
+        _project(tmp_path, [{"id": "a", "services": ["web"]}])
+
+
+def test_bad_config_exits_2_with_one_line(tmp_path, monkeypatch, capsys):
+    (tmp_path / "eyes.json").write_text("{not json")
+    monkeypatch.chdir(tmp_path)
+    assert main(["run"]) == 2
+    assert capsys.readouterr().err.startswith("eyes: ")
+
+
+# running commands
+
+def test_slow_command_becomes_a_failed_check_not_a_crash(tmp_path):
+    project = _project(tmp_path, [{"id": "slow", "argv": ["sleep 5"]}], timeout=0.5)
+    assert _checks(project, "slow")["runs"].status == "fail"
+
+
+def test_slow_tty_command_is_killed_at_the_timeout(tmp_path):
+    project = _project(tmp_path, [{"id": "slow", "argv": ["sleep 5"], "tty": True}], timeout=0.5)
+    assert "timed out" in _checks(project, "slow")["runs"].detail
+
+
+def test_missing_executable_becomes_a_failed_check(tmp_path):
+    project = _project(tmp_path, [{"id": "x", "command": ["no-such-binary-xyz"]}])
+    assert "could not start" in _checks(project, "x")["runs"].detail
+
+
+def test_tty_case_receives_stdin(tmp_path):
+    project = _project(tmp_path, [{"id": "echo", "argv": ["read line; echo got:$line"], "tty": True,
+                                   "stdin": "hello\n", "stdout_contains": ["got:hello"]}])
+    assert _checks(project, "echo")["stdout-contains"].status == "pass"
+
+
+def test_long_stdin_in_a_tty_case_does_not_time_out(tmp_path):
+    project = _project(tmp_path, [{"id": "cat", "argv": ["cat | wc -c"], "tty": True,
+                                   "stdin": "x" * 5000 + "\n"}], timeout=5)
+    assert "runs" not in _checks(project, "cat")
+
+
+def test_temp_workspace_keeps_the_source_folder_clean(tmp_path):
+    (tmp_path / "site").mkdir()
+    project = _project(tmp_path, [{"id": "w", "cwd": "site", "workspace": "temp",
+                                   "setup": ["echo made > made.txt"], "argv": ["cat made.txt"],
+                                   "stdout_contains": ["made"]}])
+    assert _full(project, "w")["stdout-contains"].status == "pass"
+    assert not (tmp_path / "site" / "made.txt").exists()
+
+
+def test_failed_setup_is_reported_with_its_output(tmp_path):
+    project = _project(tmp_path, [{"id": "s", "setup": ["echo broken >&2; exit 3"], "argv": ["true"]}])
+    row = next(r for r in _report(project)["failures"] if r["check"] == "runs")
+    assert "setup step 1 failed" in row["detail"] and "broken" in row["detail"]
+
+
+def test_service_is_ready_before_the_case_and_stopped_after(tmp_path):
+    service = {"command": [sys.executable, "-m", "http.server", "47321", "--bind", "127.0.0.1"],
+               "ready": {"url": "http://127.0.0.1:47321/"}}
+    fetch = f"{sys.executable} -c \"import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:47321/').status)\""
+    project = _project(tmp_path, [{"id": "web", "services": ["web"], "argv": [fetch],
+                                   "stdout_contains": ["200"]}], services={"web": service})
+    assert _full(project, "web")["stdout-contains"].status == "pass"
+    assert subprocess.run(["sh", "-c", fetch], capture_output=True).returncode != 0
+
+
+def test_service_that_dies_fails_the_case_with_its_log(tmp_path):
+    service = {"command": "echo cannot bind >&2; exit 1", "ready": {"url": "http://127.0.0.1:47322/"}}
+    project = _project(tmp_path, [{"id": "c", "services": ["svc"], "argv": ["true"]}], services={"svc": service})
+    row = next(r for r in _report(project)["failures"] if r["check"] == "runs")
+    assert "exited" in row["detail"] and "cannot bind" in row["detail"]
+
+
+# snapshots and report
+
+def test_approve_accepts_the_inspected_run_without_rerunning(tmp_path):
+    project = _project(tmp_path, [{"id": "a", "argv": ["echo one"]}])
+    report.run(project, None, browser_wanted=False)
+    project.config["cases"][0]["argv"] = ["echo two"]
+    assert report.approve(project, None) == 0
+    assert "one" in (project.snapshots / "a.txt").read_text()
+
+
+def test_approve_without_a_captured_run_fails(tmp_path):
+    assert report.approve(_project(tmp_path, [{"id": "a", "argv": ["echo one"]}]), None) == 1
+
+
+def test_first_run_of_a_new_case_shows_the_captured_output(tmp_path):
+    row = next(r for r in _report(_project(tmp_path, [{"id": "new", "argv": ["echo hi"]}]))["failures"])
+    assert row["check"] == "snapshot" and "hi" in row["actual"]
+
+
+def test_reproduce_keeps_multiline_stdin_intact(tmp_path):
+    project = _project(tmp_path, [{"id": "a", "argv": ["cat"], "stdin": "one\ntwo\n"}])
+    shell = report._reproduce(project, _result(project, "a"))["shell"]
+    assert subprocess.run(["sh", "-c", shell], capture_output=True, text=True).stdout == "one\ntwo\n"
+
+
+# checks
+
+def test_html_scan_flags_meta_refresh_and_inline_handlers(tmp_path):
+    page = tmp_path / "p.html"
+    page.write_text('<!doctype html><meta http-equiv="refresh" content="0;url=https://x">'
+                    '<body onload="fetch(1)">hi</body>')
+    offline = {c.check: c for c in checks._check_html(page, None)}["html-offline"]
+    assert offline.status == "fail"
+    assert "refresh" in offline.detail and "onload" in offline.detail
+
+
+def test_wide_characters_count_as_two_terminal_cells():
+    assert checks.cells("日本") == 4
+    assert checks.cells("abc") == 3
+
+
+def test_browser_requested_but_unavailable_is_a_failure(tmp_path):
+    project = _project(tmp_path, [{"id": "a", "argv": ["echo hi"], "tty": True}])
+    result = _result(project, "a")
+    assert any(c.status == "fail" for c in browser.browser_checks(None, "no browser", project, result))
+
+
+# page flows
+
+playwright = pytest.importorskip("playwright.sync_api")
+
+
+def _page_project(tmp_path, steps):
+    (tmp_path / "site").mkdir()
+    (tmp_path / "site" / "index.html").write_text(
+        "<!doctype html><title>t</title><p id=intro>Hello reader.</p>"
+        "<button id=go onclick=\"document.querySelector('#intro').textContent='Clicked.'\">Go</button>")
+    service = {"command": [sys.executable, "-m", "http.server", "47323", "--bind", "127.0.0.1"],
+               "cwd": "{workspace}", "ready": {"url": "http://127.0.0.1:47323/"}}
+    return _project(tmp_path, [{"id": "flow", "cwd": "site", "services": ["web"],
+                                "page": {"steps": steps, "step_timeout": 3}}], services={"web": service})
+
+
+def test_page_flow_runs_each_step_and_screenshots_it(tmp_path):
+    project = _page_project(tmp_path, [{"goto": "http://127.0.0.1:47323/index.html"},
+                                       {"click": "#go"}, {"expect_text": "Clicked.", "in": "#intro"}])
+    rows = _report(project)["checks"]
+    steps = [r for r in rows if r["check"].startswith("step-")]
+    assert [r["status"] for r in steps] == ["pass", "pass", "pass"]
+    assert all((project.artifacts / "cases" / "flow" / f"step-0{i}-{a}.png").exists()
+               for i, a in ((1, "goto"), (2, "click"), (3, "expect_text")))
+
+
+def test_failed_step_stops_the_flow_and_names_the_step(tmp_path):
+    project = _page_project(tmp_path, [{"goto": "http://127.0.0.1:47323/index.html"},
+                                       {"click": "#missing"}, {"click": "#go"}])
+    failures = {r["check"]: r for r in _report(project)["failures"]}
+    assert "step-02-click" in failures and "steps-skipped" in failures
+
+
+# init
+
+def test_init_guesses_a_node_cli_and_writes_starter_cases(tmp_path, capsys):
+    (tmp_path / "package.json").write_text(json.dumps({"bin": {"tool": "bin/tool.js"}}))
+    assert init(tmp_path, None) == 0
+    config = json.loads((tmp_path / "eyes" / "eyes.json").read_text())
+    assert config["command"] == ["node", "bin/tool.js"] and config["version"] == 1
+    assert init(tmp_path, None) == 2
