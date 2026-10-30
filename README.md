@@ -1,26 +1,35 @@
 # agent-eyes
 
-Let a coding agent see your CLI or web UI the way a user does, then tell it
-what to fix.
+Check that what you built actually works, the way a user would use it. Then
+check that it is good to use.
 
-`eyes` runs your product in real situations: in a pipe, in a terminal of a set
-width, or as a page in Chromium driven step by step. It checks what a user
-would notice and compares the output with snapshots that you reviewed. Then it
-writes a report that names each problem, shows the evidence, and points at the
-file that most likely needs the edit.
+A coding agent can write a feature and pass its unit tests, and the product can
+still be broken: the command crashes on real input, the button does nothing,
+the file never gets written. `eyes` closes that gap. It runs your CLI or web UI
+end to end, like a user does, and reports what happened with evidence an agent
+can read: the output, the files left behind, and a screenshot of every step.
 
-The core is Python stdlib only. Page flows and screenshots use Playwright.
+Use it to answer three questions after every change:
+
+1. **Does it work?** Run the real command or click through the real page, then
+   check the exit code, the output, the JSON values and the files it wrote.
+2. **Did anything else break?** Compare every case with the output you reviewed
+   last time.
+3. **Is it good to use?** Catch the problems users notice: stack traces, color
+   codes in logs, text wider than the terminal, broken plurals, unreadable
+   contrast, and text hidden under a panel.
+
+`eyes` works with a CLI or web UI in any language. The core is Python stdlib
+only. Page flows and screenshots use Playwright.
 
 ## Install
 
 ```bash
-pip install agent-eyes                          # terminal and HTML checks
-pip install 'agent-eyes[browser]'               # adds page flows and screenshots
+pip install "agent-eyes[browser] @ git+https://github.com/bharadwaj-pendyala/agent-eyes"
 python -m playwright install chromium
 ```
 
-`eyes` tests any CLI or web UI, in any language. Your project does not need to
-use Python.
+Leave out `[browser]` and the Playwright step if you only test a CLI.
 
 ## Start
 
@@ -33,6 +42,57 @@ eyes approve --all  # accepts the output once you have read it
 `eyes init` guesses your CLI from `package.json` (`bin`) or `pyproject.toml`
 (`[project.scripts]`, which must be installed in the same environment as
 `eyes`). Pass `--command 'node bin/tool.js'` to set it yourself.
+
+## Verify a feature works
+
+Write a case for what the feature must do, before or right after you build it.
+Each case is an executable statement of the expected behavior.
+
+A CLI feature: `tool init --agent codex` must succeed, say so, and write a
+config with that agent.
+
+```json
+{"id": "init-writes-config", "workspace": "temp",
+ "argv": ["init", "--agent", "codex"],
+ "exit": 0,
+ "stdout_contains": ["configured (agent: codex)"],
+ "files": {".tool/config.json": {"json": {"agent": "codex"}}}}
+```
+
+A machine-readable output: `tool check hard.md --json` must report a failure
+for that file.
+
+```json
+{"id": "json-verdict", "argv": ["check", "hard.md", "--json"], "exit": 1,
+ "stdout_json": {"files.0.verdict": "fail", "summary.failed": 1}}
+```
+
+A web feature: leaving a comment must add it to the sidebar, keep it after a
+reload, and save it to disk.
+
+```json
+{"id": "comment-flow", "workspace": "temp", "services": ["api", "site"],
+ "page": {"steps": [
+   {"goto": "http://localhost:4612/post.html"},
+   {"select_text": "article p"},
+   {"click": "#add-comment"},
+   {"fill": "#comment textarea", "text": "too vague"},
+   {"click": "[data-save]"},
+   {"expect_count": ".card", "count": 1},
+   {"reload": true},
+   {"expect_text": "too vague", "in": ".sidebar"}
+ ]},
+ "files": {".tool/comments.json": {"contains": ["too vague"]}}}
+```
+
+Error paths are features too. A user who mistypes must get a clear message and
+the right exit code:
+
+```json
+{"id": "typo", "argv": ["deev"], "exit": 2, "stderr_contains": ["did you mean 'dev'"]}
+```
+
+Run `eyes run --case <id>` while you build. Run `eyes run` before you commit.
 
 ## Commands
 
@@ -55,44 +115,51 @@ the config in `eyes.json`, `eyes/eyes.json`, `tests/ux/eyes.json` or
 | `artifacts/eyes/report.json` | Read this first. `failures` lists every failed check. |
 | `artifacts/eyes/report.txt` | The same report for people. |
 | `artifacts/eyes/cases/<id>/stdout.txt` | Output without color codes. `stdout.ansi` keeps them. |
-| `artifacts/eyes/cases/<id>/snapshot.diff` | How the output changed from the reviewed snapshot. |
-| `artifacts/eyes/cases/<id>/*.png` | Screenshots. Open them to see the page or the terminal. |
+| `artifacts/eyes/cases/<id>/step-NN-*.png` | A screenshot after each page step. Open them to see what the user saw. |
+| `artifacts/eyes/cases/<id>/workspace/` | The temp copy the case ran in, with every file it wrote. |
 | `artifacts/eyes/cases/<id>/service-*.log` | Output of each background service. |
+| `artifacts/eyes/cases/<id>/snapshot.diff` | How the output changed from the reviewed snapshot. |
 
 Each failure in `report.json` has `check`, `detail`, `expected`, `actual`,
 `source` (the file to edit, from your config) and `reproduce.shell`.
 
 ## What it checks
 
-Every command case:
+**It works.** Set these per case:
 
-- The exit code, and that no Python traceback reaches the user.
-- The expected text on stdout and stderr, as plain text or a regex.
+- The exit code.
+- Text on stdout and stderr, as plain text or a regex.
+- Values in JSON output, by dotted path such as `files.0.verdict`.
+- Files the case wrote: that they exist or not, their text, and JSON values.
+- Each page step: the click lands, the element appears, the text shows up.
+  A failed step stops the flow and names the step.
+
+**Nothing else broke.** Every case is compared with its reviewed snapshot: the
+full output for a command, and the step list plus the visible page text for a
+page.
+
+**It is good to use.** These run on every case without any setup:
+
+- No stack trace reaches the user (Python, Node, Rust, Go).
 - No color codes in piped output or under `NO_COLOR`, and color in a real TTY.
-- Line width in terminal cells, at the case width (80 when piped).
+- Lines fit the terminal width, measured in terminal cells.
 - Count and noun agree, so the output never says "1 files".
-- Strict JSON when the case says the output is JSON.
-- HTML files are one document that loads nothing from the network.
-- The output matches the reviewed snapshot.
-
-Every page case, and HTML files under `--browser`:
-
-- Each step runs, with a screenshot after it. A failed step stops the flow.
-- The page loads nothing outside localhost.
-- No horizontal overflow, no text hidden under another element (a fixed panel,
-  banner or modal), no console errors, and text contrast meets WCAG AA.
+- JSON output is strict JSON. HTML output is one document that loads nothing
+  from the network.
+- On pages: nothing loads from outside localhost unless allowed, no horizontal
+  overflow, no text hidden under another element, no console errors, and text
+  contrast meets WCAG AA.
 
 ## The config
 
 ```json
 {
   "version": 1,
-  "command": ["node", "bin/tool.js"],
-  "cwd": "eyes/fixtures",
+  "command": ["node", "{root}/bin/tool.js"],
+  "cwd": "..",
   "sources": {"cli": "bin/tool.js"},
   "cases": [
-    {"id": "help", "argv": ["--help"], "stdout_contains": ["Usage", "Examples"]},
-    {"id": "typo", "argv": ["--hepl"], "exit": 2, "stderr_contains": ["did you mean"]}
+    {"id": "help", "argv": ["--help"], "stdout_contains": ["usage:"]}
   ]
 }
 ```
@@ -102,13 +169,13 @@ Top-level keys:
 | Key | Meaning |
 |---|---|
 | `version` | Always `1`. |
-| `command` | How to run your CLI. `{python}` is the Python that runs eyes. |
+| `command` | How to run your CLI. `{python}` is the Python that runs eyes, `{root}` is the repo root. |
 | `cwd` | Folder the cases run in, relative to the config. |
 | `env` | Extra environment variables for every case. |
 | `pass_env` | Names of variables to copy from your shell, such as `DATABASE_URL`. Cases start from a clean environment, so nothing else leaks in. |
 | `timeout` | Seconds before a case is stopped (default 30). |
 | `sources` | Files to name in failures: `cli`, `terminal`, `json`, `html`, `page`. |
-| `plugins` | Python files with `checks(result, project) -> list[Check]`. |
+| `plugins` | Python files with `checks(result, project) -> list[Check]`, for checks no key covers. |
 | `services` | Background processes that cases can start. See below. |
 | `plural_nouns`, `titled`, `artifacts`, `snapshots` | Tuning; see the source. |
 
@@ -118,30 +185,33 @@ Case keys:
 |---|---|
 | `argv`, `command` | Arguments, and an optional per-case command. `{out}` is the case artifact folder. |
 | `exit` | Expected exit code (default 0). |
+| `stdout_contains`, `stdout_absent`, `stdout_regex`, `stdout_empty` | Checks on stdout. The same `stderr_` keys exist. |
+| `stdout_json` | `{"dotted.path": value}` pairs that the JSON on stdout must hold. |
+| `files` | `{"path": {...}}` for files the case must leave behind. Each takes `exists` (default `true`), `contains`, `absent` and `json` (dotted paths). Paths are relative to where the case ran. |
+| `workspace: "temp"` | Run in a fresh copy of `cwd`, so the case can change files safely. `{workspace}` is its path. The copy leaves out `.git` and the artifacts folder; run `git init` in `setup` if the case needs a repo. |
+| `setup` | Shell commands to run in the workspace first. |
+| `services` | Names of services to start before the case and stop after it. |
+| `page` | Makes this a page case. See below. |
 | `tty`, `cols` | Run in a real terminal of this width. With `stdin`, stdin is a pipe. |
 | `stdin`, `stdin_file`, `env`, `pass_env`, `cwd`, `timeout` | Input and environment. |
-| `workspace: "temp"` | Run in a fresh copy of `cwd`, so the case can change files safely. `{workspace}` is its path. The copy leaves out `.git` and the artifacts folder; run `git init` in `setup` if the case needs a repo. |
-| `setup` | Shell commands to run in the workspace first, for example `git init`. |
-| `services` | Names of services to start before the case and stop after it. |
-| `stdout_contains`, `stdout_absent`, `stdout_regex`, `stdout_empty` | Checks on stdout. The same `stderr_` keys exist. |
 | `expect_ansi`, `check_width` | Color must appear; set `check_width: false` for machine formats. |
 | `json`, `html`, `html_contains` | Output is JSON; the case writes this HTML file; its visible text has these strings. |
-| `page` | Makes this a page case. See below. |
+| `note` | Free text for people. |
 
-`eyes` rejects unknown keys and suggests the closest one, so a typo never
-turns a check off.
+`eyes` rejects unknown keys and page steps and suggests the closest one, so a
+typo never turns a check off.
 
 ## Services and page flows
 
-A service is a background process that a case needs, such as a dev server.
-`eyes` starts it, waits until `ready` succeeds, runs the case, then stops it.
-Its output goes to `service-<name>.log`.
+A service is a background process that a case needs, such as an API or a dev
+server. `eyes` starts it, waits until `ready` succeeds, runs the case, then
+stops it. Its output goes to `service-<name>.log`.
 
 ```json
 "services": {
   "site": {
     "command": ["python3", "-m", "http.server", "4612"],
-    "cwd": "{workspace}/demo",
+    "cwd": "{workspace}/public",
     "ready": {"url": "http://localhost:4612/"}
   }
 }
@@ -149,26 +219,11 @@ Its output goes to `service-<name>.log`.
 
 `ready` takes a `url` that must answer, or a `log` regex that must appear.
 
-A page case drives the UI in Chromium like a user does:
-
-```json
-{"id": "comment-flow", "workspace": "temp", "services": ["site"],
- "page": {"viewport": "desktop", "steps": [
-   {"goto": "http://localhost:4612/index.html"},
-   {"select_text": "article p"},
-   {"click": "#add-comment"},
-   {"fill": "#comment textarea", "text": "too vague"},
-   {"click": "[data-save]"},
-   {"expect_count": ".card", "count": 1},
-   {"reload": true},
-   {"expect_text": "too vague", "in": ".rail"}
- ]}}
-```
-
-Steps: `goto`, `click` (with `count`), `select_text`, `fill` (with `text`),
-`press` (with `on`), `wait_for` (with `state`), `expect_text` (with `in`),
-`expect_count` (with `count`), `reload`, `wait` (seconds). `viewport` is
-`desktop`, `mobile` or `[width, height]`. `step_timeout` is in seconds.
+Page steps: `goto`, `click` (with `count`), `select_text`, `fill` (with
+`text`), `press` (with `on`), `wait_for` (with `state`), `expect_text` (with
+`in`), `expect_count` (with `count`), `reload`, `wait` (seconds). Page keys:
+`viewport` (`desktop`, `mobile` or `[width, height]`), `step_timeout` in
+seconds, and `allow`.
 
 A page may load from localhost only. List other origins the flow needs in
 `allow`, for example `"allow": ["https://fonts.gstatic.com/", "https://api.example.com/"]`.
@@ -176,33 +231,48 @@ Any other request is blocked and fails the network check.
 
 ## The agent loop
 
-1. Run `eyes run --browser`.
-2. Read `artifacts/eyes/report.json`. Start with `failures`.
-3. Open the screenshots and `stdout.txt` files of the failing cases. Read them
-   as a first-time user would.
-4. Fix the file in `source`. Change a check only when the check is wrong.
-5. Run again until only `snapshot` checks fail.
-6. Read each `snapshot.diff`. Approve the changes that improve the output.
+When an agent builds or changes a feature:
+
+1. Write cases for what the feature must do, including its error paths.
+2. Run `eyes run --case <id>` and watch the new cases fail.
+3. Build until they pass. Read `artifacts/eyes/report.json` after each run,
+   starting with `failures`.
+4. Open the screenshots, `stdout.txt` and the workspace files of the cases you
+   touched. Confirm the product does the right thing, not just that the checks
+   pass.
+5. Run `eyes run --browser` for everything. Fix what you broke.
+6. Read each `snapshot.diff`. Approve only the changes you meant to make.
 7. Commit.
 
-Write a case before you change the product, and watch it fail first.
+Fix the product, not the check. Change a check only when the check is wrong.
 
-### Prompt for a UX improvement loop
+### Prompt: build and verify a feature
+
+```text
+Build <feature>. Use `eyes` to prove it works the way a user would use it.
+1. Before you write code, add cases to eyes/eyes.json for what the feature
+   must do: the happy path, the outputs and files it must produce, and the
+   errors a user can hit. Run them and confirm they fail.
+2. Build the feature until the cases pass.
+3. Open the screenshots and outputs of those cases. Check that the result is
+   right, not only that the checks pass.
+4. Run `eyes run` for every case. Fix anything you broke.
+5. Review each snapshot.diff and approve only intended changes. Then commit.
+```
+
+### Prompt: improve the user experience
 
 ```text
 Improve the UX of this project with `eyes` as your eyes.
 1. Run `eyes run --browser`. Read artifacts/eyes/report.json.
-2. Open the screenshots and stdout.txt files. List what a first-time user and
-   a CI user would find confusing, noisy, or missing. Try the product on real
-   inputs too, not only the fixtures.
+2. Open the screenshots and stdout.txt files. Try the product on real inputs
+   too. List what a first-time user and a CI user would find confusing,
+   noisy, or broken.
 3. Rank the problems by how many users hit them and how badly. Skip rare
    edge cases.
-4. For each problem worth fixing, add a case to eyes/eyes.json that fails today.
-5. Fix the product, not the check. Keep each fix small.
-6. Rerun until only snapshot checks fail. Review every snapshot.diff, then
-   approve only the changes that improve the output.
-7. Ask a second agent to review the diff from a user's point of view.
-8. Commit with a message that says why.
+4. For each problem worth fixing, add a case that fails today, then fix the
+   product until it passes.
+5. Review every snapshot.diff, approve only improvements, and commit.
 Stop when the remaining problems are rare edge cases.
 ```
 

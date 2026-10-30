@@ -8,7 +8,7 @@ import shutil
 import sys
 
 from . import browser, runner
-from .checks import generic_checks, html_text
+from .checks import generic_checks, html_text, outcome_checks
 from .core import Check, Project, Result, rel, shell_quote
 
 
@@ -54,6 +54,7 @@ def _run_one(project: Project, case: dict, eyes, why: str, browser_wanted: bool)
 
     checks = generic_checks(project, result) + checks
     if not result.harness_error:
+        checks += outcome_checks(project, result)
         for plugin in project.plugins:
             checks.extend(plugin.checks(result, project))
         checks.append(_check_snapshot(project, result, snapshot_text(project, result)))

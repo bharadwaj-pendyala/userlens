@@ -1,4 +1,4 @@
-"""agent-eyes: let an agent see a CLI or web UI the way a user does, then tell it what to fix.
+"""agent-eyes: check that a CLI or web UI works the way a user uses it, then that it is good to use.
 
 Project specifics live in eyes.json and in plugin files. A plugin is a Python
 file with ``checks(result, project) -> list[Check]``.

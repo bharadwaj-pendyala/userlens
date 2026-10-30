@@ -5,12 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "agent-eyes"
 version = "0.1.0"
-description = "Let coding agents see a CLI or web UI the way users do: run it, check its UX, and report what to fix."
+description = "Check that a CLI or web UI works the way users use it, then that it is good to use. Built for coding agents."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Bharadwaj Pendyala" }]
-keywords = ["ux", "testing", "cli", "agents", "playwright", "snapshot"]
+keywords = ["testing", "acceptance", "e2e", "ux", "cli", "agents", "playwright", "snapshot"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",

@@ -328,3 +328,44 @@ def test_page_allow_list_lets_named_hosts_through(tmp_path):
                                    "page": {"steps": steps, "allow": ["https://cdn.example.invalid/"]}}],
                        services={"web": service})
     assert "browser-page-network" not in {r["check"] for r in _report(allowed)["failures"]}
+
+
+def test_files_checks_what_a_command_wrote(tmp_path):
+    project = _project(tmp_path, [{"id": "w", "workspace": "temp",
+                                   "argv": ["mkdir -p out && echo '{\"agent\": \"codex\", \"ports\": [4517]}' > out/c.json"],
+                                   "files": {"out/c.json": {"contains": ["codex"], "json": {"agent": "codex", "ports.0": 4517}},
+                                             "out/missing.txt": {"exists": False}}}])
+    found = _full(project, "w")
+    assert found["file out/c.json"].status == "pass"
+    assert found["file out/missing.txt"].status == "pass"
+
+
+def test_files_reports_the_wrong_value_and_where(tmp_path):
+    project = _project(tmp_path, [{"id": "w", "workspace": "temp", "argv": ["echo '{\"agent\": \"claude\"}' > c.json"],
+                                   "files": {"c.json": {"json": {"agent": "codex"}}, "nope.txt": {}}}])
+    found = _full(project, "w")
+    assert found["file c.json"].status == "fail" and "agent" in found["file c.json"].detail
+    assert "claude" in found["file c.json"].actual
+    assert found["file nope.txt"].status == "fail"
+
+
+def test_stdout_json_checks_values_by_path(tmp_path):
+    project = _project(tmp_path, [{"id": "j", "argv": ["echo '{\"files\": [{\"verdict\": \"fail\"}], \"n\": 2}'"],
+                                   "stdout_json": {"files.0.verdict": "fail", "n": 3, "files.5.verdict": "x"}}])
+    rows = {r["expected"]: r for r in _report(project)["checks"] if r["check"] == "stdout-json"}
+    assert rows["files.0.verdict = \"fail\""]["status"] == "pass"
+    assert rows["n = 3"]["status"] == "fail" and rows["n = 3"]["actual"] == "2"
+    assert "no value" in rows["files.5.verdict = \"x\""]["detail"]
+
+
+def test_files_are_checked_after_a_page_flow(tmp_path):
+    (tmp_path / "site").mkdir()
+    (tmp_path / "site" / "index.html").write_text("<!doctype html><title>t</title><p>hi</p>")
+    service = {"command": [sys.executable, "-m", "http.server", "47326", "--bind", "127.0.0.1"],
+               "cwd": "{workspace}", "ready": {"url": "http://127.0.0.1:47326/"}}
+    project = _project(tmp_path, [{"id": "p", "cwd": "site", "workspace": "temp", "services": ["web"],
+                                   "setup": ["echo saved > result.txt"],
+                                   "page": {"steps": [{"goto": "http://127.0.0.1:47326/index.html"}]},
+                                   "files": {"result.txt": {"contains": ["saved"]}}}], services={"web": service})
+    rows = {r["check"]: r for r in _report(project)["checks"] if r["case"] == "p"}
+    assert rows["file result.txt"]["status"] == "pass"

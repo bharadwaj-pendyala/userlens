@@ -35,6 +35,79 @@ def generic_checks(project: Project, result: Result) -> list[Check]:
     return checks
 
 
+_MISSING = object()
+
+
+def outcome_checks(project: Project, result: Result) -> list[Check]:
+    """Did it work? The values it printed and the files it left behind, for commands and page flows alike."""
+    source = project.sources.get("cli")
+    checks = []
+    if "stdout_json" in result.case:
+        checks += _check_stdout_json(result, source)
+    for path, spec in result.case.get("files", {}).items():
+        checks.append(_check_file(project.expand(path, result.out_dir, result.cwd), spec, result, source))
+    return checks
+
+
+def value_at(data, path: str):
+    """Follow a dotted path such as ``files.0.score.verdict`` into parsed JSON."""
+    for part in path.split("."):
+        if isinstance(data, list) and part.isdigit() and int(part) < len(data):
+            data = data[int(part)]
+        elif isinstance(data, dict) and part in data:
+            data = data[part]
+        else:
+            return _MISSING
+    return data
+
+
+def _check_stdout_json(result: Result, source) -> list[Check]:
+    try:
+        data = json.loads(result.stdout)
+    except ValueError:
+        return [Check("stdout-json", "fail", "stdout is not JSON, so its values cannot be checked",
+                      actual=tail(result.stdout), source=source)]
+    checks = []
+    for path, want in result.case["stdout_json"].items():
+        got = value_at(data, path)
+        expected = f"{path} = {json.dumps(want)}"
+        if got is _MISSING:
+            checks.append(Check("stdout-json", "fail", f"no value at {path!r}", expected, None, source))
+        else:
+            ok = got == want
+            checks.append(Check("stdout-json", "pass" if ok else "fail", "" if ok else f"{path} has the wrong value",
+                                expected, None if ok else json.dumps(got), source))
+    return checks
+
+
+def _check_file(path: str, spec: dict, result: Result, source) -> Check:
+    name = f"file {path}"
+    target = result.cwd / path
+    if not spec.get("exists", True):
+        ok = not target.exists()
+        return Check(name, "pass" if ok else "fail", "" if ok else "this file should not exist", source=source)
+    if not target.is_file():
+        return Check(name, "fail", "the file was not written", f"a file at {path}", source=source,
+                     extra={"artifact": str(result.cwd)})
+    text = target.read_text(encoding="utf-8", errors="replace")
+    problems = [f"missing {needle!r}" for needle in spec.get("contains", []) if needle not in text]
+    problems += [f"should not contain {needle!r}" for needle in spec.get("absent", []) if needle in text]
+    if "json" in spec:
+        try:
+            data = json.loads(text)
+        except ValueError:
+            problems.append("not valid JSON")
+        else:
+            for key, want in spec["json"].items():
+                got = value_at(data, key)
+                if got is _MISSING:
+                    problems.append(f"no value at {key!r}")
+                elif got != want:
+                    problems.append(f"{key} is {json.dumps(got)}, expected {json.dumps(want)}")
+    return Check(name, "fail" if problems else "pass", "; ".join(problems),
+                 actual=tail(text) if problems else None, source=source, extra={"artifact": str(target)})
+
+
 def _check_exit(result: Result, source) -> Check:
     want = result.case.get("exit", 0)
     ok = result.exit == want

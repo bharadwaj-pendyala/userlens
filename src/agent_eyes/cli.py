@@ -29,7 +29,7 @@ Exit codes:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="eyes", description="Let an agent see your CLI or web UI the way a user does.",
+        prog="eyes", description="Check that your CLI or web UI works the way a user uses it, then that it is good to use.",
         epilog=EXAMPLES, formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--config", help="path to eyes.json (default: search the usual places)")

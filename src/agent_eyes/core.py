@@ -25,8 +25,9 @@ CASE_KEYS = {
     "timeout", "workspace", "setup", "services", "page", "pass_env",
     "stdout_contains", "stdout_absent", "stdout_regex", "stdout_empty",
     "stderr_contains", "stderr_absent", "stderr_regex",
-    "expect_ansi", "check_width", "json", "html", "html_contains",
+    "expect_ansi", "check_width", "json", "html", "html_contains", "files", "stdout_json",
 }
+FILE_KEYS = {"exists", "contains", "absent", "json"}
 SERVICE_KEYS = {"command", "cwd", "env", "ready", "timeout"}
 PAGE_KEYS = {"steps", "viewport", "step_timeout", "allow"}
 STEP_ACTIONS = {"goto", "click", "select_text", "fill", "press", "wait_for", "expect_text",
@@ -136,6 +137,8 @@ def _validate(config: dict) -> None:
         _unknown_keys(case, CASE_KEYS, f"case {case_id!r}")
         if "page" in case:
             _validate_page(case["page"], case_id)
+        for path, spec in case.get("files", {}).items():
+            _unknown_keys(spec, FILE_KEYS, f"case {case_id!r} file {path!r}")
         for name in case.get("services", []):
             if name not in config.get("services", {}):
                 raise ConfigError(f"case {case_id!r} uses service {name!r}, which is not defined")
